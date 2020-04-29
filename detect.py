@@ -53,7 +53,7 @@ def main(_argv):
                 bbox_tensors.append(bbox_tensor)
 
             model = tf.keras.Model(input_layer, bbox_tensors)
-            utils.load_weights(model, FLAGS.weights)
+            model.load_weights(FLAGS.weights)
 
         model.summary()
         pred_bbox = model.predict(image_data)

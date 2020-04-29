@@ -6,6 +6,7 @@ import shutil
 import numpy as np
 import tensorflow as tf
 import core.utils as utils
+import sys
 from core.config import cfg
 from core.yolov4 import YOLOv4, decode
 
@@ -17,6 +18,9 @@ flags.DEFINE_boolean('tiny', False, 'yolov3 or yolov3-tiny')
 flags.DEFINE_integer('size', 416, 'resize images to')
 flags.DEFINE_string('annotation_path', "./data/dataset/val2017.txt", 'annotation path')
 flags.DEFINE_string('write_image_path', "./data/detection/", 'write image path')
+flags.DEFINE_boolean('tensorboard', True, 'report in tensorbard the predicted images?')
+flags.DEFINE_string('log', './data/log', 'default tensorflow log file')
+flags.DEFINE_integer('step', 0, 'The current training step')
 
 def main(_argv):
     INPUT_SIZE = FLAGS.size
@@ -34,6 +38,10 @@ def main(_argv):
     if os.path.exists(ground_truth_dir_path): shutil.rmtree(ground_truth_dir_path)
     if os.path.exists(cfg.TEST.DECTECTED_IMAGE_PATH): shutil.rmtree(cfg.TEST.DECTECTED_IMAGE_PATH)
 
+    #Used for tensorboard
+    images = []
+    writer = tf.summary.create_file_writer(FLAGS.log)
+
     os.mkdir(predicted_dir_path)
     os.mkdir(ground_truth_dir_path)
     os.mkdir(cfg.TEST.DECTECTED_IMAGE_PATH)
@@ -41,34 +49,26 @@ def main(_argv):
     # Build Model
     if FLAGS.framework == "tf":
         input_layer = tf.keras.layers.Input([INPUT_SIZE, INPUT_SIZE, 3])
-        if FLAGS.tiny:
-            feature_maps = YOLOv4(input_layer)
-            bbox_tensors = []
-            for i, fm in enumerate(feature_maps):
-                bbox_tensor = decode(fm, i)
-                bbox_tensors.append(bbox_tensor)
+        
+        
+        feature_maps = YOLOv4(input_layer)
+        bbox_tensors = []
+        for i, fm in enumerate(feature_maps):
+            bbox_tensor = decode(fm, i)
+            bbox_tensors.append(bbox_tensor)
 
-            model = tf.keras.Model(input_layer, bbox_tensors)
-            utils.load_weights_tiny(model, FLAGS.weights)
-        else:
-            feature_maps = YOLOv4(input_layer)
-            bbox_tensors = []
-            for i, fm in enumerate(feature_maps):
-                bbox_tensor = decode(fm, i)
-                bbox_tensors.append(bbox_tensor)
+        model = tf.keras.Model(input_layer, bbox_tensors)
+        
+        optimizer   = tf.keras.optimizers.Adam()
+        ckpt        = tf.train.Checkpoint(step=tf.Variable(1, trainable=False, dtype=tf.int64), optimizer=optimizer, net=model)
+        manager     = tf.train.CheckpointManager(ckpt, './checkpoints', max_to_keep=10)
 
-            model = tf.keras.Model(input_layer, bbox_tensors)
-            utils.load_weights(model, FLAGS.weights)
-    else:
-        # Load TFLite model and allocate tensors.
-        interpreter = tf.lite.Interpreter(model_path=FLAGS.weights)
-        interpreter.allocate_tensors()
-        # Get input and output tensors.
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
-        print(input_details)
-        print(output_details)
+        ckpt.restore(manager.latest_checkpoint)
+
+        #model.load_weights(ckpt)
+   
     num_lines = sum(1 for line in open(FLAGS.annotation_path))
+
     with open(cfg.TEST.ANNOT_PATH, 'r') as annotation_file:
         for num, line in enumerate(annotation_file):
             annotation = line.strip().split()
@@ -119,7 +119,7 @@ def main(_argv):
                 xy_grid = xy_grid.astype(np.float)
 
                 pred_xy = (tf.sigmoid(conv_raw_dxdy) + xy_grid) * STRIDES[i]
-                # pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
+                #pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
                 pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i])
                 pred[:, :, :, :, 0:4] = tf.concat([pred_xy, pred_wh], axis=-1)
             pred_bbox = [tf.reshape(x, (-1, tf.shape(x)[-1])) for x in pred_bbox]
@@ -127,26 +127,35 @@ def main(_argv):
             bboxes = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
             bboxes = utils.nms(bboxes, cfg.TEST.IOU_THRESHOLD, method='nms')
 
-            if cfg.TEST.DECTECTED_IMAGE_PATH is not None:
-                image = utils.draw_bbox(image, bboxes)
-                cv2.imwrite(cfg.TEST.DECTECTED_IMAGE_PATH + image_name, image)
+            image = utils.draw_bbox(image, bboxes)
+            images.append(image)
 
-            with open(predict_result_path, 'w') as f:
-                for bbox in bboxes:
-                    coor = np.array(bbox[:4], dtype=np.int32)
-                    score = bbox[4]
-                    class_ind = int(bbox[5])
-                    class_name = CLASSES[class_ind]
-                    score = '%.4f' % score
-                    xmin, ymin, xmax, ymax = list(map(str, coor))
-                    bbox_mess = ' '.join([class_name, score, xmin, ymin, xmax, ymax]) + '\n'
-                    f.write(bbox_mess)
-                    print('\t' + str(bbox_mess).strip())
-            print(num, num_lines)
+            # if cfg.TEST.DECTECTED_IMAGE_PATH is not None:
+            #     image = utils.draw_bbox(image, bboxes)
+            #     #cv2.imwrite(cfg.TEST.DECTECTED_IMAGE_PATH + image_name, image)
+            #     images.append(image)
+
+            # with open(predict_result_path, 'w') as f:
+            #     for bbox in bboxes:
+            #         coor = np.array(bbox[:4], dtype=np.int32)
+            #         score = bbox[4]
+            #         class_ind = int(bbox[5])
+            #         class_name = CLASSES[class_ind]
+            #         score = '%.4f' % score
+            #         xmin, ymin, xmax, ymax = list(map(str, coor))
+            #         bbox_mess = ' '.join([class_name, score, xmin, ymin, xmax, ymax]) + '\n'
+            #         f.write(bbox_mess)
+            #         print('\t' + str(bbox_mess).strip())
+            # print(num, num_lines)
+            
+    with writer.as_default():
+        images_2 = np.reshape(images[0:1000], (-1, 320, 320, 3))
+        tf.summary.image("image data examples", images_2, max_outputs=1000, step=FLAGS.step)
 
 if __name__ == '__main__':
     try:
         app.run(main)
+        sys.exit()
     except SystemExit:
         pass
 
