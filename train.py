@@ -48,7 +48,13 @@ def main(_argv):
         print("Training from scratch")
     else:
         if FLAGS.weights.split(".")[len(FLAGS.weights.split(".")) - 1] == "weights":
-            utils.load_weights(model, FLAGS.weights)
+            if FLAGS.tiny:
+                utils.load_weights_tiny(model, FLAGS.weights)
+            else:
+                if FLAGS.model == 'yolov3':
+                    utils.load_weights_v3(model, FLAGS.weights)
+                else:
+                    utils.load_weights(model, FLAGS.weights)
         else:
             model.load_weights(FLAGS.weights)
         print('Restoring weights from: %s ... ' % FLAGS.weights)
@@ -69,7 +75,7 @@ def main(_argv):
             # optimizing process
             for i in range(3):
                 conv, pred = pred_result[i * 2], pred_result[i * 2 + 1]
-                loss_items = compute_loss(pred, conv, *target[i], i)
+                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=STRIDES, NUM_CLASS=NUM_CLASS, IOU_LOSS_THRESH=IOU_LOSS_THRESH, i=i)
                 giou_loss += loss_items[0]
                 conf_loss += loss_items[1]
                 prob_loss += loss_items[2]
@@ -109,7 +115,7 @@ def main(_argv):
             # optimizing process
             for i in range(3):
                 conv, pred = pred_result[i * 2], pred_result[i * 2 + 1]
-                loss_items = compute_loss(pred, conv, *target[i], i)
+                loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=STRIDES, NUM_CLASS=NUM_CLASS, IOU_LOSS_THRESH=IOU_LOSS_THRESH, i=i)
                 giou_loss += loss_items[0]
                 conf_loss += loss_items[1]
                 prob_loss += loss_items[2]
