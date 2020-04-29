@@ -8,7 +8,7 @@ import tensorflow as tf
 import core.utils as utils
 import sys
 from core.config import cfg
-from core.yolov4 import YOLOv4, YOLOv3, decode
+from core.yolov4 import YOLOv4, decode
 
 flags.DEFINE_string('weights', '/media/user/Source/Code/VNPT/cv_models_quantization/tflite/yolov3_tflite/data/yolov3.weights',
                     'path to weights file')
@@ -31,6 +31,7 @@ def main(_argv):
     else:
         STRIDES = np.array(cfg.YOLO.STRIDES)
         ANCHORS = utils.get_anchors(cfg.YOLO.ANCHORS, FLAGS.tiny)
+
     NUM_CLASS = len(utils.read_class_names(cfg.YOLO.CLASSES))
     CLASSES = utils.read_class_names(cfg.YOLO.CLASSES)
     predicted_dir_path = './mAP/predicted'
@@ -46,24 +47,26 @@ def main(_argv):
     os.mkdir(predicted_dir_path)
     os.mkdir(ground_truth_dir_path)
     os.mkdir(cfg.TEST.DECTECTED_IMAGE_PATH)
-
+    
+    NUM_CLASS   = len(utils.read_class_names(cfg.YOLO.CLASSES))
+    STRIDES     = np.array(cfg.YOLO.STRIDES)
+    ANCHORS     = utils.get_anchors(cfg.YOLO.ANCHORS)
     # Build Model
-    if FLAGS.framework == "tf":
-        input_layer = tf.keras.layers.Input([INPUT_SIZE, INPUT_SIZE, 3])
-        
-        feature_maps = YOLOv4(input_layer)
-        bbox_tensors = []
-        for i, fm in enumerate(feature_maps):
-            bbox_tensor = decode(fm, i)
-            bbox_tensors.append(bbox_tensor)
+    input_layer = tf.keras.layers.Input([INPUT_SIZE, INPUT_SIZE, 3])
+    
+    feature_maps = YOLOv4(input_layer, NUM_CLASS)
+    bbox_tensors = []
+    for i, fm in enumerate(feature_maps):
+        bbox_tensor = decode(fm, NUM_CLASS, i)
+        bbox_tensors.append(bbox_tensor)
 
-        model = tf.keras.Model(input_layer, bbox_tensors)
-        
-        optimizer   = tf.keras.optimizers.Adam()
-        ckpt        = tf.train.Checkpoint(step=tf.Variable(1, trainable=False, dtype=tf.int64), optimizer=optimizer, net=model)
-        manager     = tf.train.CheckpointManager(ckpt, './checkpoints', max_to_keep=10)
+    model = tf.keras.Model(input_layer, bbox_tensors)
+    
+    optimizer   = tf.keras.optimizers.Adam()
+    ckpt        = tf.train.Checkpoint(step=tf.Variable(1, trainable=False, dtype=tf.int64), optimizer=optimizer, net=model)
+    manager     = tf.train.CheckpointManager(ckpt, './checkpoints', max_to_keep=10)
 
-        ckpt.restore(manager.latest_checkpoint)
+    ckpt.restore(manager.latest_checkpoint)
 
         #model.load_weights(ckpt)
    
@@ -107,20 +110,11 @@ def main(_argv):
                 interpreter.set_tensor(input_details[0]['index'], image_data)
                 interpreter.invoke()
                 pred_bbox = [interpreter.get_tensor(output_details[i]['index']) for i in range(len(output_details))]
-            if FLAGS.model == 'yolov3':
-                pred_bbox = utils.postprocess_bbbox(pred_bbox, ANCHORS, STRIDES)
-            elif FLAGS.model == 'yolov4':
+            
+            if FLAGS.model == 'yolov4':
                 XYSCALE = cfg.YOLO.XYSCALE
                 pred_bbox = utils.postprocess_bbbox(pred_bbox, ANCHORS, STRIDES, XYSCALE=XYSCALE)
 
-                xy_grid = np.tile(tf.expand_dims(xy_grid, axis=0), [1, 1, 1, 3, 1])
-                xy_grid = xy_grid.astype(np.float)
-
-                pred_xy = (tf.sigmoid(conv_raw_dxdy) + xy_grid) * STRIDES[i]
-                #pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
-                pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i])
-                pred[:, :, :, :, 0:4] = tf.concat([pred_xy, pred_wh], axis=-1)
-            pred_bbox = [tf.reshape(x, (-1, tf.shape(x)[-1])) for x in pred_bbox]
             pred_bbox = tf.concat(pred_bbox, axis=0)
             bboxes = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
             bboxes = utils.nms(bboxes, cfg.TEST.IOU_THRESHOLD, method='nms')

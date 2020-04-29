@@ -32,16 +32,22 @@ def main(_argv):
     total_steps = (first_stage_epochs + second_stage_epochs) * steps_per_epoch
     # train_steps = (first_stage_epochs + second_stage_epochs) * steps_per_period
 
+    NUM_CLASS = len(utils.read_class_names(cfg.YOLO.CLASSES))
+    STRIDES         = np.array(cfg.YOLO.STRIDES)
+    IOU_LOSS_THRESH = cfg.YOLO.IOU_LOSS_THRESH
+    XYSCALE         = cfg.YOLO.XYSCALE
+    ANCHORS         = utils.get_anchors(cfg.YOLO.ANCHORS)
+
     input_layer = tf.keras.layers.Input([cfg.TRAIN.INPUT_SIZE, cfg.TRAIN.INPUT_SIZE, 3])
     
     #YOLOV4
-    feature_maps = YOLOv4(input_layer)
+    feature_maps = YOLOv4(input_layer, NUM_CLASS)
     bbox_tensors = []
     for i, fm in enumerate(feature_maps):
-        bbox_tensor = decode_train(fm, i)
+        bbox_tensor = decode(fm, NUM_CLASS, STRIDES, ANCHORS, i)
         bbox_tensors.append(fm)
         bbox_tensors.append(bbox_tensor)
-
+        
     model = tf.keras.Model(input_layer, bbox_tensors)
 
     if FLAGS.weights == "none":
