@@ -3,7 +3,7 @@ from absl.flags import FLAGS
 import os
 import shutil
 import tensorflow as tf
-from core.yolov4 import YOLOv4, decode, compute_loss, decode_train
+from core.yolov4 import YOLOv4, decode_train, compute_loss, decode_train
 from core.dataset import Dataset
 from core.config import cfg
 import numpy as np
@@ -44,7 +44,7 @@ def main(_argv):
     feature_maps = YOLOv4(input_layer, NUM_CLASS)
     bbox_tensors = []
     for i, fm in enumerate(feature_maps):
-        bbox_tensor = decode(fm, NUM_CLASS, STRIDES, ANCHORS, i)
+        bbox_tensor = decode_train(fm, NUM_CLASS, STRIDES, ANCHORS, i)
         bbox_tensors.append(fm)
         bbox_tensors.append(bbox_tensor)
         
